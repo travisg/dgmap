@@ -18,6 +18,10 @@ namespace po = boost::program_options;
 game_player_vector players;
 game_planet_vector planets;
 
+cairo_surface_t *s;
+cairo_t *c;
+void *canvas;
+
 /* args */
 int xres;
 int yres;
@@ -131,10 +135,47 @@ static int write_png_file(const char *file_name, uint width, uint height, void *
 	return 0;
 }
 
+static int init_canvas()
+{
+	size_t len = sizeof(uint32_t) * xres * yres;
+	canvas = (uint32_t*)malloc(len);
+
+	s = cairo_image_surface_create_for_data((unsigned char *)canvas, CAIRO_FORMAT_ARGB32, xres, yres, xres * 4);
+
+	c = cairo_create(s);
+
+	/* fill it with black */
+	cairo_set_source_rgba(c, 0, 0, 0, 1);
+	cairo_paint(c);
+
+	cairo_identity_matrix(c);
+
+	return 0;
+}
+
+static int write_image(const char *file)
+{
+	return write_png_file(file, xres, yres, canvas);
+}
+
+static int draw_planets()
+{
+
+	for (game_planet_vector_citer i = planets.begin(); i != planets.end(); i++) {
+		const game_planet *p = *i;
+
+		cairo_set_source_rgba(c, p->color[0], p->color[2], p->color[1], 1);
+
+		cairo_arc(c, p->x * zoom, p->y * zoom, 1, 0, 3.14159*2);
+		cairo_fill(c);
+	}
+
+	return 0;
+}
+
+#if 0
 static int cairo_test()
 {
-	cairo_surface_t *s;
-
 	size_t len = sizeof(uint32_t) * xres * yres;
 	uint32_t *ptr = (uint32_t*)malloc(len);
 
@@ -143,7 +184,7 @@ static int cairo_test()
 	printf("surface data %p\n", cairo_image_surface_get_data(s));
 	printf("ptr %p\n", ptr);
 
-	cairo_t *c = cairo_create(s);
+	c = cairo_create(s);
 	printf("cairo %p\n", c);
 
 	/* fill it with black */
@@ -171,7 +212,7 @@ static int cairo_test()
 
 	return 0;
 }
-
+#endif
 
 static int load_db()
 {
@@ -336,13 +377,40 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	cairo_test();
-	//write_png_file("what.png", xres, yres, NULL);
-	return 0;
+//	cairo_test();
 
 	printf("loading database...\n");
 	load_db();
 	printf("done loading database.\n");
+
+	// walk through some
+	float maxx, maxy;
+
+	maxx = maxy = 0.0;
+	for (game_planet_vector_citer i = planets.begin(); i != planets.end(); i++) {
+		const game_planet *p = *i;
+
+		if (p->x > maxx)
+			maxx = p->x;
+		if (p->y > maxy)
+			maxy = p->y;
+	}
+	printf("maxx %f maxy %f\n", maxx, maxy);
+
+	// override xres/yres for now
+	xres = maxx + 1;
+	yres = maxy + 1;
+
+	xres *= zoom;
+	yres *= zoom;
+
+	printf("xres %d yres %d\n", xres, yres);
+
+	init_canvas();
+
+	draw_planets();
+
+	write_image("what.png");
 
 	return 0;
 

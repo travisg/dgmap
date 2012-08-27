@@ -10,6 +10,7 @@ struct game_player {
 };
 
 typedef std::vector<game_player *> game_player_vector;
+typedef std::vector<game_player *>::const_iterator game_player_vector_citer;
 extern game_player_vector players;
 
 struct game_planet {
@@ -25,5 +26,6 @@ struct game_planet {
 };
 
 typedef std::vector<game_planet *> game_planet_vector;
+typedef std::vector<game_planet *>::const_iterator game_planet_vector_citer;
 extern game_planet_vector planets;
 
