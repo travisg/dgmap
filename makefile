@@ -8,7 +8,7 @@ CFLAGS :=
 CPPFLAGS :=
 ASMFLAGS :=
 LDFLAGS :=
-LDLIBS += -lstdc++ -lboost_system-mt -lboost_program_options-mt -lboost_thread-mt -lcairo
+LDLIBS += -lstdc++ -lboost_system-mt -lboost_program_options-mt -lboost_thread-mt -lcairo -lpng
 
 UNAME := $(shell uname -s)
 ARCH := $(shell uname -m)

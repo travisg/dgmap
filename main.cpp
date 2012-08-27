@@ -1,7 +1,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits.h>
-#include <cairo/cairo.h>
 
 #include <boost/program_options/option.hpp>
 #include <boost/program_options/options_description.hpp>
@@ -9,6 +8,8 @@
 #include <boost/program_options/parsers.hpp>
 #include <boost/thread.hpp>
 #include <boost/algorithm/string.hpp>
+#include <cairo/cairo.h>
+#include <png.h>
 
 #include "gamedata.h"
 
@@ -16,6 +17,11 @@ namespace po = boost::program_options;
 
 game_player_vector players;
 game_planet_vector planets;
+
+/* args */
+int xres;
+int yres;
+int zoom;
 
 static void color_to_float(float *color, unsigned int c)
 {
@@ -42,18 +48,97 @@ static void color_to_float(float *color, const char *str)
 	color_to_float(color, c);
 }
 
+/* write a 32bit png file */
+static int write_png_file(const char *file_name, uint width, uint height, void *dat)
+{
+	int y;
+	png_byte color_type = PNG_COLOR_TYPE_RGBA;
+	png_byte bit_depth = 8; // XXX
+
+	png_structp png_ptr;
+	png_infop info_ptr;
+	png_bytep * row_pointers;
+
+	uint32_t *data = (uint32_t *)dat;
+
+	row_pointers = (png_bytep*) malloc(sizeof(png_bytep) * height);
+	for (y=0; y<height; y++) {
+		row_pointers[y] = (png_bytep)&data[y * width];
+	}
+
+	/* create file */
+	FILE *fp = fopen(file_name, "wb");
+	if (!fp) {
+		printf("[write_png_file] File %s could not be opened for writing", file_name);
+		return -1;
+	}
+
+	/* initialize stuff */
+	png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+
+	if (!png_ptr) {
+		printf("[write_png_file] png_create_write_struct failed");
+		return -1;
+	}
+
+	info_ptr = png_create_info_struct(png_ptr);
+	if (!info_ptr) {
+		printf("[write_png_file] png_create_info_struct failed");
+		return -1;
+	}
+
+	if (setjmp(png_jmpbuf(png_ptr))) {
+		printf("[write_png_file] Error during init_io");
+		return -1;
+	}
+
+	png_init_io(png_ptr, fp);
+
+	/* write header */
+	if (setjmp(png_jmpbuf(png_ptr))) {
+		printf("[write_png_file] Error during writing header");
+		return -1;
+	}
+
+	png_set_IHDR(png_ptr, info_ptr, width, height,
+				 bit_depth, color_type, PNG_INTERLACE_NONE,
+				 PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
+
+	png_write_info(png_ptr, info_ptr);
+
+	/* write bytes */
+	if (setjmp(png_jmpbuf(png_ptr))) {
+		printf("[write_png_file] Error during writing bytes");
+		return -1;
+	}
+
+	png_write_image(png_ptr, row_pointers);
+
+
+	/* end write */
+	if (setjmp(png_jmpbuf(png_ptr))) {
+		printf("[write_png_file] Error during end of write");
+		return -1;
+	}
+
+	png_write_end(png_ptr, NULL);
+
+	/* cleanup heap allocation */
+	free(row_pointers);
+
+	fclose(fp);
+
+	return 0;
+}
+
 static int cairo_test()
 {
 	cairo_surface_t *s;
 
-#define W 640
-#define H 480
-
-	size_t len = sizeof(uint32_t) * W * H;
+	size_t len = sizeof(uint32_t) * xres * yres;
 	uint32_t *ptr = (uint32_t*)malloc(len);
-	memset(ptr, 0, len);
 
-	s = cairo_image_surface_create_for_data((unsigned char *)ptr, CAIRO_FORMAT_ARGB32, W, H, W * 4);
+	s = cairo_image_surface_create_for_data((unsigned char *)ptr, CAIRO_FORMAT_ARGB32, xres, yres, xres * 4);
 	printf("surface %p\n", s);
 	printf("surface data %p\n", cairo_image_surface_get_data(s));
 	printf("ptr %p\n", ptr);
@@ -61,26 +146,32 @@ static int cairo_test()
 	cairo_t *c = cairo_create(s);
 	printf("cairo %p\n", c);
 
-	cairo_set_source_rgba(c, 1, .5, .75, 1);
+	/* fill it with black */
+	cairo_set_source_rgba(c, 0, 0, 0, 1);
+	cairo_paint(c);
+
+	/* set color to white */
+	cairo_set_source_rgba(c, 1, 1, 1, 1);
 
 	//cairo_new_path(c);
-	cairo_identity_matrix(c);
-	cairo_set_line_width(c, 1);
-	cairo_arc(c, W/2, H/2, H/2, 0, 1);
-	//cairo_move_to(c, 0, 0);
-	//cairo_line_to(c, W/2, H/2);
+	//cairo_identity_matrix(c);
+	cairo_matrix_t m;
+	cairo_matrix_init_scale(&m, xres, yres);
+	cairo_set_matrix(c, &m);
+	cairo_set_line_width(c, .01);
+	cairo_move_to(c, 0, 0);
+	cairo_line_to(c, .5, .5);
 	//cairo_close_path(c);
 	//cairo_paint(c);
 	cairo_stroke(c);
-	//cairo_fill(c);
+	cairo_arc(c, .5, .5, .25, 0, 3.14159*2);
+	cairo_fill(c);
 
-	FILE *fp = fopen("image.dat", "w+");
-	fwrite(ptr, len, 1, fp);
-	fclose(fp);
-
+	write_png_file("what.png", xres, yres, ptr);
 
 	return 0;
 }
+
 
 static int load_db()
 {
@@ -229,8 +320,9 @@ int main(int argc, char **argv)
 	po::options_description desc("Allowed options");
 	desc.add_options()
 		("help,h", "help message")
-//		("xres", po::value<int>(&xres)->default_value(800), "x resolution")
-//		("yres", po::value<int>(&yres)->default_value(600), "y resolution")
+		("xres", po::value<int>(&xres)->default_value(800), "x resolution")
+		("yres", po::value<int>(&yres)->default_value(600), "y resolution")
+		("zoom,z", po::value<int>(&zoom)->default_value(1), "zoom factor")
 //		("cpus,c", po::value<int>(&cpus)->default_value(8), "number cpus")
 //		("out,o", po::value<std::string>(&outfile)->default_value(std::string("out.ray")), "output file")
 	;
@@ -244,7 +336,13 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	cairo_test();
+	//write_png_file("what.png", xres, yres, NULL);
+	return 0;
+
+	printf("loading database...\n");
 	load_db();
+	printf("done loading database.\n");
 
 	return 0;
 
